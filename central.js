@@ -2,62 +2,68 @@
 
 const api = require('pc-ble-driver-js');
 const path = require('path');
+const prompt = require('prompt-sync')({ sigint: true });
 
 const adapterFactory = api.AdapterFactory.getInstance(undefined, {
   enablePolling: false,
 });
 
-const BLE_UUID_BLINKY_SERVICE = '000015231212EFDE1523785FEABCD123';
-const LBS_UUID_BLINKY_BUTTON_CHAR = '000015241212EFDE1523785FEABCD123';
-const LBS_UUID_BLINKY_LED_CHAR = '000015251212EFDE1523785FEABCD123';
+const BLE_DEVICE_NAME = 'Nordic_UART';
+
+const BLE_UUID_NUS_SERVICE = '6E400001B5A3F393E0A9E50E24DCCA9E'; // NUS Service
+const LBS_UUID_NUS_TX_CHAR = '6E400003B5A3F393E0A9E50E24DCCA9E'; // NUS TX
+const LBS_UUID_NUS_RX_CHAR = '6E400002B5A3F393E0A9E50E24DCCA9E'; // NUS RX
 
 const BLE_UUID_CCCD = '2902';
 
-function discoverBlinkyService(adapter, device) {
+let connectedDevice = undefined;
+const notificationsEnabled = [1, 0];
+
+function discoverNusService(adapter, device) {
   return new Promise((resolve, reject) => {
     adapter.getServices(device.instanceId, (err, services) => {
       if (err) {
-        reject(Error(`Error discovering the blinky service: ${err}.`));
+        reject(Error(`Error discovering the NUS service: ${err}.`));
         return;
       }
 
       for (const service in services) {
-        if (services[service].uuid === BLE_UUID_BLINKY_SERVICE) {
+        if (services[service].uuid === BLE_UUID_NUS_SERVICE) {
           resolve(services[service]);
           return;
         }
       }
 
-      reject(Error("Did not discover the blinky service in peripheral's GATT attribute table."));
+      reject(Error("Did not discover the NUS service in peripheral's GATT attribute table."));
     });
   });
 }
 
-function discoverButtonCharacteristic(adapter, blinkyService) {
+function discoverTxCharacteristic(adapter, NusService) {
   return new Promise((resolve, reject) => {
-    adapter.getCharacteristics(blinkyService.instanceId, (err, characteristics) => {
+    adapter.getCharacteristics(NusService.instanceId, (err, characteristics) => {
       if (err) {
-        reject(Error(`Error discovering the blinky service's characteristics: ${err}.`));
+        reject(Error(`Error discovering the NUS service's characteristics: ${JSON.stringify(err)}.`));
         return;
       }
 
       for (const characteristic in characteristics) {
-        if (characteristics[characteristic].uuid === LBS_UUID_BLINKY_BUTTON_CHAR) {
+        if (characteristics[characteristic].uuid === LBS_UUID_NUS_TX_CHAR) {
           resolve(characteristics[characteristic]);
           return;
         }
       }
 
-      reject(Error("Did not discover the blinky button char in peripheral's GATT attribute table."));
+      reject(Error("Did not discover the NUS TX char in peripheral's GATT attribute table."));
     });
   });
 }
 
-function discoverButtonCharCCCD(adapter, blinkyButtonCharacteristic) {
+function discoverTxCharCCCD(adapter, NusTxCharacteristic) {
   return new Promise((resolve, reject) => {
-    adapter.getDescriptors(blinkyButtonCharacteristic.instanceId, (err, descriptors) => {
+    adapter.getDescriptors(NusTxCharacteristic.instanceId, (err, descriptors) => {
       if (err) {
-        reject(Error(`Error discovering the blinky characteristic's CCCD: ${err}.`));
+        reject(Error(`Error discovering the NUS characteristic's CCCD: ${JSON.stringify(err)}.`));
         return;
       }
 
@@ -68,16 +74,53 @@ function discoverButtonCharCCCD(adapter, blinkyButtonCharacteristic) {
         }
       }
 
-      reject(Error("Did not discover the blinky chars CCCD in peripheral's GATT attribute table."));
+      reject(Error("Did not discover the NUS chars CCCD in peripheral's GATT attribute table."));
     });
   });
 }
 
+function addUserPrompt(adapter, cccdDescriptor) {
+  console.log('Type `s` or `S` to toggle notifications on the TX characteristic.');
+  console.log('Type `q` or `Q` to disconnect from the BLE peripheral and quit application.');
+
+  while (true) {
+    const input = prompt('Enter command:').toLocaleLowerCase();
+
+    if (input === 'q') {
+      adapter.close((err) => {
+        if (err) {
+          console.log(`Error closing the adapter: ${err}.`);
+        }
+
+        console.log('Exiting the application...');
+        process.exit(1);
+      });
+    } else if (input === 's') {
+      if (notificationsEnabled[0]) {
+        notificationsEnabled[0] = 0;
+        console.log('Disabling notifications on the NUS TX characteristic.');
+      } else {
+        notificationsEnabled[0] = 1;
+        console.log('Enabling notifications on the NUS TX characteristic.');
+      }
+      adapter.writeDescriptorValue(cccdDescriptor.instanceId, notificationsEnabled, false, (err) => {
+        if (err) {
+          console.log(`Error enabling notifications on the NUS TX characteristic: ${err}.`);
+          process.exit(1);
+        }
+
+        console.log('Notifications toggled on the NUS TX characteristic.');
+      });
+    }
+  }
+}
+
 function addUserInputListener(adapter, cccdDescriptor) {
+  console.log('Press any key to toggle notifications on the TX characteristic.');
+  console.log('Press `q` or `Q` to disconnect from the BLE peripheral and quit application.');
+
   process.stdin.setEncoding('utf8');
   process.stdin.setRawMode(true);
-
-  const notificationsEnabled = [0, 0];
 
   process.stdin.on('readable', () => {
     const chunk = process.stdin.read();
@@ -92,23 +135,22 @@ function addUserInputListener(adapter, cccdDescriptor) {
         console.log('Exiting the application...');
         process.exit(1);
       });
-    } else if (chunk[0] === 'l' || chunk[0] === 'L') {
     } else {
       if (notificationsEnabled[0]) {
         notificationsEnabled[0] = 0;
-        console.log('Disabling notifications on the blinky button characteristic.');
+        console.log('Disabling notifications on the NUS TX characteristic.');
       } else {
         notificationsEnabled[0] = 1;
-        console.log('Enabling notifications on the blinky button characteristic.');
+        console.log('Enabling notifications on the NUS TX characteristic.');
       }
 
       adapter.writeDescriptorValue(cccdDescriptor.instanceId, notificationsEnabled, false, (err) => {
         if (err) {
-          console.log(`Error enabling notifications on the blinky button characteristic: ${err}.`);
+          console.log(`Error enabling notifications on the NUS TX characteristic: ${err}.`);
           process.exit(1);
         }
 
-        console.log('Notifications toggled on the blinky button characteristic.');
+        console.log('Notifications toggled on the NUS TX characteristic.');
       });
     }
   });
@@ -180,12 +222,6 @@ function startScan(adapter) {
   });
 }
 
-/**
- * Handling events emitted by adapter.
- *
- * @param {Adapter} adapter Adapter in use.
- * @returns {void}
- */
 function addAdapterListener(adapter) {
   adapter.on('logMessage', (severity, message) => {
     if (severity > 3) console.log(`LOG ${severity} ${message}`);
@@ -197,23 +233,34 @@ function addAdapterListener(adapter) {
 
   adapter.on('deviceConnected', (device) => {
     console.log(`Device ${device.address}/${device.addressType} connected.`);
+    connectedDevice = device;
 
-    discoverBlinkyService(adapter, device)
+    discoverNusService(adapter, device)
       .then((service) => {
-        console.log('Discovered the blinky service.');
+        console.log('Discovered the NUS service.');
 
-        return discoverButtonCharacteristic(adapter, service)
+        return discoverTxCharacteristic(adapter, service)
           .then((characteristic) => {
-            console.log('Discovered the blinky button characteristic.');
-            return discoverButtonCharCCCD(adapter, characteristic);
+            console.log('Discovered the NUS TX characteristic.');
+            return discoverTxCharCCCD(adapter, characteristic);
           })
           .then((descriptor) => {
-            console.log("Discovered the blinky button characteristic's CCCD.");
+            console.log("Discovered the NUS TX characteristic's CCCD.");
 
-            console.log('Press any key to toggle notifications on the button characteristic.');
-            console.log('Press `l` or `L` to toggle LED on and off.');
-            console.log('Press `q` or `Q` to disconnect from the BLE peripheral and quit application.');
-            addUserInputListener(adapter, descriptor);
+            console.log('Enabling notifications on the NUS TX characteristic.');
+
+            adapter.writeDescriptorValue(descriptor.instanceId, notificationsEnabled, false, (err) => {
+              if (err) {
+                console.log(`Error enabling notifications on the NUS TX characteristic: ${err}.`);
+                process.exit(1);
+              }
+
+              console.log('Notifications toggled on the NUS TX characteristic.');
+            });
+
+            // INFO: Not used right now, notifications are enabled by default
+            // addUserInputListener(adapter, descriptor);
+            // addUserPrompt(adapter, descriptor);
           });
       })
       .catch((error) => {
@@ -235,7 +282,7 @@ function addAdapterListener(adapter) {
   });
 
   adapter.on('deviceDiscovered', (device) => {
-    if (device.name === 'Nordic_Blinky') {
+    if (device.name === BLE_DEVICE_NAME) {
       console.log(`Discovered device ${device.address}/${device.addressType}.`);
       connect(adapter, device.address)
         .then(() => {
@@ -254,25 +301,18 @@ function addAdapterListener(adapter) {
   });
 
   adapter.on('characteristicValueChanged', (attribute) => {
-    if (attribute.uuid === LBS_UUID_BLINKY_BUTTON_CHAR) {
-      console.log(`Received blinky button: ${+attribute.value === 1 ? 'ON' : 'OFF'}.`);
+    if (attribute.uuid === LBS_UUID_NUS_TX_CHAR) {
+      console.log(`Received NUS Data: ${attribute.value}.`);
     }
   });
 }
 
-/**
- * Opens adapter for use with the default options.
- *
- * @param {Adapter} adapter Adapter to be opened.
- * @returns {Promise} Resolves if the adapter is opened successfully.
- *                    If an error occurs, rejects with the corresponding error.
- */
 function openAdapter(adapter) {
   return new Promise((resolve, reject) => {
     const baudRate = 1000000;
     console.log(`Opening adapter with ID: ${adapter.instanceId} and baud rate: ${baudRate}...`);
 
-    adapter.open({ baudRate, logLevel: 'error' }, (err) => {
+    adapter.open({ baudRate, logLevel: 'debug' }, (err) => {
       if (err) {
         reject(Error(`Error opening adapter: ${err}.`));
       }
@@ -291,9 +331,6 @@ function help() {
   console.log('It is assumed that the nRF device has been programmed with the correct connectivity firmware.');
 }
 
-/**
- * Application main entry.
- */
 if (process.argv.length !== 4) {
   help();
   process.exit(-1);
