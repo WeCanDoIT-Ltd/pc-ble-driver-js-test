@@ -187,6 +187,7 @@ function connect(adapter, connectToAddress) {
         return;
       }
 
+      console.time('connectionTime');
       resolve();
     });
   });
@@ -263,6 +264,7 @@ function addAdapterListener(adapter) {
 
   adapter.on('deviceDisconnected', (device) => {
     console.log(`Device ${device.address} disconnected.`);
+    console.timeEnd('connectionTime');
 
     startScan(adapter)
       .then(() => {
