@@ -16,8 +16,19 @@ const LBS_UUID_NUS_RX_CHAR = '6E400002B5A3F393E0A9E50E24DCCA9E'; // NUS RX
 
 const BLE_UUID_CCCD = '2902';
 
-let connectedDevice = undefined;
-const notificationsEnabled = [1, 0];
+const notificationsEnabled = [1, 0]; // Start with notifications enabled
+
+// FIXME: https://github.com/NordicSemiconductor/pc-ble-driver-js/issues/76
+const connectionsPararms = {
+  min_conn_interval: 7.5,
+  minConnectionInterval: 7.5,
+  max_conn_interval: 300,
+  maxConnectionInterval: 300,
+  slave_latency: 0,
+  slaveLatency: 0,
+  conn_sup_timeout: 4000,
+  connectionSupervisionTimeout: 4000,
+};
 
 function discoverNusService(adapter, device) {
   return new Promise((resolve, reject) => {
@@ -156,14 +167,6 @@ function addUserInputListener(adapter, cccdDescriptor) {
   });
 }
 
-/**
- * Connects to the desired BLE peripheral.
- *
- * @param {Adapter} adapter Adapter being used.
- * @param {any} connectToAddress Device address of the advertising BLE peripheral to connect to.
- * @returns {Promise} Resolves on successfully connecting to the BLE peripheral.
- *                    If an error occurs, rejects with the corresponding error.
- */
 function connect(adapter, connectToAddress) {
   return new Promise((resolve, reject) => {
     console.log(`Connecting to device ${connectToAddress}...`);
@@ -175,12 +178,7 @@ function connect(adapter, connectToAddress) {
         window: 50,
         timeout: 0,
       },
-      connParams: {
-        min_conn_interval: 7.5,
-        max_conn_interval: 300,
-        slave_latency: 0,
-        conn_sup_timeout: 4000,
-      },
+      connParams: connectionsPararms,
     };
 
     adapter.connect(connectToAddress, options, (err) => {
@@ -194,13 +192,6 @@ function connect(adapter, connectToAddress) {
   });
 }
 
-/**
- * Function to start scanning (GAP Discovery procedure, Observer Procedure).
- *
- * @param {Adapter} adapter Adapter being used.
- * @returns {Promise} Resolves on successfully initiating the scanning procedure.
- *                    If an error occurs, rejects with the corresponding error.
- */
 function startScan(adapter) {
   return new Promise((resolve, reject) => {
     console.log('Started scanning...');
@@ -222,6 +213,41 @@ function startScan(adapter) {
   });
 }
 
+function handleConnectedDevice(adapter, device) {
+  discoverNusService(adapter, device)
+    .then((service) => {
+      console.log('Discovered the NUS service.');
+
+      return discoverTxCharacteristic(adapter, service)
+        .then((characteristic) => {
+          console.log('Discovered the NUS TX characteristic.');
+          return discoverTxCharCCCD(adapter, characteristic);
+        })
+        .then((descriptor) => {
+          console.log("Discovered the NUS TX characteristic's CCCD.");
+
+          console.log('Enabling notifications on the NUS TX characteristic.');
+
+          adapter.writeDescriptorValue(descriptor.instanceId, notificationsEnabled, false, (err) => {
+            if (err) {
+              console.log(`Error enabling notifications on the NUS TX characteristic: ${err}.`);
+              process.exit(1);
+            }
+
+            console.log('Notifications toggled on the NUS TX characteristic.');
+          });
+
+          // INFO: Not used right now, notifications are enabled by default
+          // addUserInputListener(adapter, descriptor);
+          // addUserPrompt(adapter, descriptor);
+        });
+    })
+    .catch((error) => {
+      console.log(error);
+      process.exit(1);
+    });
+}
+
 function addAdapterListener(adapter) {
   adapter.on('logMessage', (severity, message) => {
     if (severity > 3) console.log(`LOG ${severity} ${message}`);
@@ -233,40 +259,6 @@ function addAdapterListener(adapter) {
 
   adapter.on('deviceConnected', (device) => {
     console.log(`Device ${device.address}/${device.addressType} connected.`);
-    connectedDevice = device;
-
-    discoverNusService(adapter, device)
-      .then((service) => {
-        console.log('Discovered the NUS service.');
-
-        return discoverTxCharacteristic(adapter, service)
-          .then((characteristic) => {
-            console.log('Discovered the NUS TX characteristic.');
-            return discoverTxCharCCCD(adapter, characteristic);
-          })
-          .then((descriptor) => {
-            console.log("Discovered the NUS TX characteristic's CCCD.");
-
-            console.log('Enabling notifications on the NUS TX characteristic.');
-
-            adapter.writeDescriptorValue(descriptor.instanceId, notificationsEnabled, false, (err) => {
-              if (err) {
-                console.log(`Error enabling notifications on the NUS TX characteristic: ${err}.`);
-                process.exit(1);
-              }
-
-              console.log('Notifications toggled on the NUS TX characteristic.');
-            });
-
-            // INFO: Not used right now, notifications are enabled by default
-            // addUserInputListener(adapter, descriptor);
-            // addUserPrompt(adapter, descriptor);
-          });
-      })
-      .catch((error) => {
-        console.log(error);
-        process.exit(1);
-      });
   });
 
   adapter.on('deviceDisconnected', (device) => {
@@ -301,9 +293,24 @@ function addAdapterListener(adapter) {
   });
 
   adapter.on('characteristicValueChanged', (attribute) => {
-    if (attribute.uuid === LBS_UUID_NUS_TX_CHAR) {
-      console.log(`Received NUS Data: ${attribute.value}.`);
-    }
+    console.log(`Received Data: ${attribute.uuid} ${attribute.value}`);
+  });
+
+  adapter.on('connParamUpdateRequest', (device, connectionParameters) => {
+    console.log(`connParamUpdateRequest: ${JSON.stringify(connectionParameters)}.`);
+
+    adapter.updateConnectionParameters(device.instanceId, connectionParameters, (err) => {
+      if (err) {
+        console.log(`updateConnectionParameters Failed: ${err.message}.`);
+        return;
+      }
+
+      handleConnectedDevice(adapter, device);
+    });
+  });
+
+  adapter.on('connParamUpdate', (device, connectionParameters) => {
+    console.log(`connParamUpdate: ${JSON.stringify(connectionParameters)}.`);
   });
 }
 
