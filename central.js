@@ -18,16 +18,11 @@ const BLE_UUID_CCCD = '2902';
 
 const notificationsEnabled = [1, 0]; // Start with notifications enabled
 
-// FIXME: https://github.com/NordicSemiconductor/pc-ble-driver-js/issues/76
 const connectionsPararms = {
   min_conn_interval: 7.5,
-  minConnectionInterval: 7.5,
   max_conn_interval: 300,
-  maxConnectionInterval: 300,
   slave_latency: 0,
-  slaveLatency: 0,
   conn_sup_timeout: 4000,
-  connectionSupervisionTimeout: 4000,
 };
 
 function discoverNusService(adapter, device) {
@@ -383,7 +378,7 @@ if (process.argv.length !== 4) {
     process.exit(-1);
   }
 
-  const adapter = adapterFactory.createAdapter(apiVersion, port, '');
+  const adapter = adapterFactory.createAdapter(apiVersion, port, 'pc-ble');
   addAdapterListener(adapter);
 
   openAdapter(adapter)
