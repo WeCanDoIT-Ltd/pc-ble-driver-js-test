@@ -295,7 +295,13 @@ function addAdapterListener(adapter) {
   });
 
   adapter.on('characteristicValueChanged', (attribute) => {
-    console.log(`Received Data: ${attribute.uuid} ${attribute.value}`);
+    switch (attribute.uuid) {
+      case LBS_UUID_NUS_TX_CHAR:
+        console.log(`NUS RX: ${attribute.uuid} ${String.fromCharCode(...attribute.value)}`);
+        break;
+      default:
+        console.log(`Received Data: ${attribute.uuid} ${attribute.value}`);
+    }
   });
 
   adapter.on('connParamUpdateRequest', (device, connectionParameters) => {
@@ -313,6 +319,24 @@ function addAdapterListener(adapter) {
 
   adapter.on('connParamUpdate', (device, connectionParameters) => {
     console.log(`connParamUpdate: ${JSON.stringify(connectionParameters)}.`);
+  });
+
+  adapter.on('dataLengthChanged', (remoteDevice, maxTxOctets) => {
+    console.log(`dataLengthChanged: ${maxTxOctets}.`);
+  });
+
+  adapter.on('dataLengthUpdated', (remoteDevice, event) => {
+    console.log(`dataLengthUpdated: ${JSON.stringify(event.effective_params)}.`);
+  });
+
+  adapter.on('attMtuRequest', (device, newMtu) => {
+    console.log(`attMtuRequest: ${newMtu}.`);
+    adapter.attMtuReply(device.instanceId, newMtu, (err, mtu) => {});
+  });
+
+  adapter.on('dataLengthUpdateRequest', (device, newOctets) => {
+    console.log(`dataLengthUpdateRequest: ${JSON.stringify(newOctets)}.`);
+    adapter.dataLengthUpdate(device.instanceId, newOctets, () => {});
   });
 }
 
